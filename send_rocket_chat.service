@@ -1,0 +1,16 @@
+# /etc/systemd/system/send_rocket_chat.service
+[Unit]
+Description=Send Rocket.Chat Messages
+After=network.target
+
+[Service]
+Type=simple
+User=grafana
+WorkingDirectory=/tmp
+ExecStart=/usr/local/bin/send_rocket_chat
+Restart=always
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+

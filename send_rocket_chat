@@ -1,0 +1,127 @@
+#!/usr/bin/python3
+import socket
+import json
+import requests
+import logging
+from systemd.journal import JournalHandler
+
+# 2024-01-25 k.siegmund initial script
+# this script listens on port 12345 and waits for kafka-type alerts from grafana
+# it extracts the subject and  panel link
+# it also parses for a label rocketchat=channelname
+# 2024-02-15_1 k.siegmund add header handling
+# 2024-02-21   k.siegmund bugfix reading chunks
+
+# Set up socket to listen on localhost and a specified port
+host = "127.0.0.1"
+port = 5555
+
+# Set your Rocket.Chat API endpoint and authentication headers
+rocket_chat_url = "http://127.0.0.1:5556/api/v1/chat.postMessage"
+rocket_chat_headers = {
+    "X-User-Id": "rocket-chat-id",
+    "X-Auth-Token": "rocket-chat-token",
+    "Content-type": "application/json"
+}
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+# set up logging to journal for info and above
+journal_handler = JournalHandler()
+journal_handler.setFormatter(logging.Formatter('%(levelname)s: %(message)s'))
+journal_handler.setLevel(logging.INFO)
+logger.addHandler(journal_handler)
+
+# set up file for debugging output
+try:
+    file_handler = logging.FileHandler('/var/log/grafana/logfile.log')
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    file_handler.setLevel(logging.DEBUG)
+    logger.addHandler(file_handler)
+except IOError as e:
+    logger.warning(f"Error opening log file: {e}")
+    logger.warning("Logging to file disabled. Continuing with journal logging.")
+
+# Function to send HTTP response
+def send_http_response(conn, status_code, content_type, content):
+    response = f"HTTP/1.1 {status_code}\r\nContent-Type: {content_type}\r\nContent-Length: {len(content)}\r\n\r\n{content}"
+    conn.sendall(response.encode())
+
+# Function to send message to Rocket.Chat
+def send_to_rocket_chat(channel, text):
+    data = {
+        "channel": channel,
+        "text": text
+    }
+    logger.info(f"sending to rocket chat channel {channel} with text {text}");
+    try:
+        response = requests.post(
+            rocket_chat_url,
+            headers=rocket_chat_headers,
+            json=data,
+            timeout=5
+        )
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Error sending message to Rocket.Chat: {e}")
+
+# Function to parse and process incoming JSON data
+def process_data(data):
+    #print("data is " + data);
+    try:
+        # Check for the start of the JSON payload
+        json_start = data.find("{")
+        if json_start == -1:
+            # JSON not found, exit processing
+            return
+
+        # Extract relevant information
+        json_data = json.loads(data[json_start:])
+        description = json_data["records"][0]["value"]["description"]
+        details = json_data["records"][0]["value"]["details"]
+        panel_url_start = details.find("\nPanel:") + len("\nPanel: ")
+        panel_url_end = details.find("\n", panel_url_start)
+        panel_url = details[panel_url_start:panel_url_end]
+        details = json_data["records"][0]["value"]["details"]
+        # find channel label and decide if we send to a channel
+        channel_start = details.find("\n - rocketchat = ") + len("\n - rocketchat = ")
+        if channel_start != -1:  # Check if the substring is found
+            channel_end = details.find("\n", channel_start)
+            channel = details[channel_start:channel_end]
+            # check that channel string isn't empty
+            if channel:
+                send_to_rocket_chat(channel, f"{description}\nPanel URL: {panel_url}")
+
+    except Exception as e:
+        logger.warning(f"Error processing data: {e}")
+
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+    server_socket.bind((host, port))
+    server_socket.listen()
+
+    logger.info(f"Listening on {host}:{port}, sending to {rocket_chat_url}")
+
+    while True:
+        conn, addr = server_socket.accept()
+        with conn:
+            conn.settimeout(5)
+            logger.info(f"Connected by {addr}")
+            data = b""
+            try:
+              while True:
+                chunk = conn.recv(1024)
+                if not chunk:
+                    break
+                data += chunk
+                #print("received data is: ")
+                #print(data)
+
+            except socket.timeout:
+                 logger.warning("Connection timed out. No data received within 2 seconds.")
+                 # Handle the timeout as needed (close the connection, perform cleanup, etc.)
+
+            if not data:
+                break
+            process_data(data.decode())
+            # Send a basic HTTP response
+            send_http_response(conn, 200, "text/plain", "OK")
