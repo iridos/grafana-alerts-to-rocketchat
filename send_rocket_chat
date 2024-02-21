@@ -79,9 +79,9 @@ def process_data(data):
         json_data = json.loads(data[json_start:])
         description = json_data["records"][0]["value"]["description"]
         details = json_data["records"][0]["value"]["details"]
-        panel_url_start = details.find("\nPanel:") + len("\nPanel: ")
-        panel_url_end = details.find("\n", panel_url_start)
-        panel_url = details[panel_url_start:panel_url_end]
+        source_url_start = details.find("\nSource:") + len("\nSource: ")
+        source_url_end = details.find("\n", source_url_start)
+        source_url = details[source_url_start:source_url_end]
         details = json_data["records"][0]["value"]["details"]
         # find channel label and decide if we send to a channel
         channel_start = details.find("\n - rocketchat = ") + len("\n - rocketchat = ")
@@ -90,7 +90,7 @@ def process_data(data):
             channel = details[channel_start:channel_end]
             # check that channel string isn't empty
             if channel:
-                send_to_rocket_chat(channel, f"{description}\nPanel URL: {panel_url}")
+                send_to_rocket_chat(channel, f"{description}\nSource URL: {source_url}")
 
     except Exception as e:
         logger.warning(f"Error processing data: {e}")
