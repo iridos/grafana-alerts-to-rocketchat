@@ -1,0 +1,16 @@
+This is a script to send an alert from grafana to rocket.chat using the kafka contact point.
+
+You will need:
+* python3 
+* python module: socket, json, requests, logging
+* grafana with a kafka endpoint configured to point the the script port
+* a regular (non-bot) user in rocket.chat and an exported token access for it
+
+Tested with: grafana 10.3.3
+
+The script listens on a port for incoming alerts and sends an "ok" status, ignoring/skipping the http headers.
+It then parses the json as sent to a "Kafka REST Proxy" endpoint, extracts the "description" and the "Panel:" entry from the "details" and then sends the extracted data to rocket.chat via its api. 
+
+The contact point is configured to a labelset "rocketchat=~..*". The value of the rocketchat label determines which channel (starting with #)  or user (starting with @) the alert is sent to. E.g. "rocketchat=@abcd" sends to the user @abcd and "rocketchat=#team-blueberry" sends the alert to the channel #team-blueberry.
+
+
